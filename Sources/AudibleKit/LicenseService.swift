@@ -52,12 +52,20 @@ public struct LicenseService: Sendable {
         }
 
         return try LicenseService.parse(
-            data, asin: asin, deviceSerial: await client.deviceSerialNumber)
+            data,
+            asin: asin,
+            deviceSerial: await client.deviceSerialNumber,
+            customerID: await client.customerID)
     }
 
     // MARK: Parsing
 
-    static func parse(_ data: Data, asin: String, deviceSerial: String) throws -> ContentLicense {
+    static func parse(
+        _ data: Data,
+        asin: String,
+        deviceSerial: String,
+        customerID: String
+    ) throws -> ContentLicense {
         guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let license = root["content_license"] as? [String: Any]
         else {
@@ -81,7 +89,8 @@ public struct LicenseService: Sendable {
             throw AudibleError.licenseDenied(asin: asin, reason: "The license held no voucher.")
         }
 
-        let (key, iv) = try decryptVoucher(voucher, asin: asin, deviceSerial: deviceSerial)
+        let (key, iv) = try decryptVoucher(
+            voucher, asin: asin, deviceSerial: deviceSerial, customerID: customerID)
 
         return ContentLicense(
             asin: asin,
@@ -94,24 +103,29 @@ public struct LicenseService: Sendable {
 
     /// Unwraps the voucher and returns the audio key and initialisation vector.
     ///
-    /// The voucher is AES-256-CBC. Its key and vector come from a SHA-256 over
-    /// the device serial, the customer identifier the server echoed, and the
-    /// ASIN, so a voucher issued to one device cannot open another's audio.
+    /// The voucher is AES-256-CBC. Its key and vector come from one SHA-256
+    /// over the device type, the device serial, the customer identifier, and
+    /// the ASIN, joined in that order. Every one of those is needed: a voucher
+    /// issued to one device and title opens on no other.
     static func decryptVoucher(
         _ voucher: String,
         asin: String,
-        deviceSerial: String
+        deviceSerial: String,
+        customerID: String
     ) throws -> (key: Data, iv: Data) {
         guard let ciphertext = Data(base64Encoded: voucher) else {
             throw AudibleError.licenseDenied(asin: asin, reason: "The voucher is not base64.")
         }
 
-        let material = Data(SHA256.hash(data: Data((deviceSerial + asin).utf8)))
+        let material = Data(SHA256.hash(data: Data(
+            (DeviceRegistration.deviceType + deviceSerial + customerID + asin).utf8)))
         let aesKey = material.prefix(16)
         let aesIV = material.suffix(16)
 
-        let plaintext = try AES.cbcDecrypt(ciphertext, key: aesKey, iv: aesIV)
-        guard let root = try? JSONSerialization.jsonObject(with: plaintext) as? [String: Any],
+        // The voucher is not padded to a block boundary, so decrypt without
+        // padding and read the JSON that the plaintext begins with.
+        let plaintext = try AES.cbcDecrypt(ciphertext, key: aesKey, iv: aesIV, padded: false)
+        guard let root = LicenseService.readJSON(plaintext),
               let keyHex = root["key"] as? String,
               let ivHex = root["iv"] as? String,
               let key = Data(hexString: keyHex),
@@ -121,6 +135,15 @@ public struct LicenseService: Sendable {
                 asin: asin, reason: "The voucher did not open. The device key may be wrong.")
         }
         return (key, iv)
+    }
+
+    /// Reads the JSON object at the start of `data`, ignoring whatever follows.
+    ///
+    /// Unpadded decryption leaves trailing bytes after the closing brace.
+    static func readJSON(_ data: Data) -> [String: Any]? {
+        guard let end = data.lastIndex(of: UInt8(ascii: "}")) else { return nil }
+        let trimmed = data[data.startIndex...end]
+        return try? JSONSerialization.jsonObject(with: trimmed) as? [String: Any]
     }
 
     static func chapters(in metadata: [String: Any]) -> [Chapter] {

@@ -7,6 +7,10 @@ import Foundation
 /// builds that sign-in URL and reads the code back out of the redirect, but
 /// displays nothing itself.
 public struct DeviceRegistration: Sendable {
+    /// The device type this client registers as. It takes part in the voucher
+    /// key, so the same value must be used at registration and at decryption.
+    public static let deviceType = "A2CZJZGLK2JJVM"
+
     private let marketplace: AudibleMarketplace
     private let transport: HTTPTransport
 
@@ -103,7 +107,7 @@ public struct DeviceRegistration: Sendable {
                 "domain": "Device",
                 "app_version": "3.56.2",
                 "device_serial": attempt.serial,
-                "device_type": "A2CZJZGLK2JJVM",
+                "device_type": DeviceRegistration.deviceType,
                 "device_name": uniqueName,
                 "os_version": "16.6",
                 "software_version": "35602678",
@@ -232,7 +236,7 @@ extension String {
     /// The client identifier Amazon expects: the serial in hexadecimal, with a
     /// fixed device-type suffix, hex-encoded again.
     var deviceClientID: String {
-        Data((self + "#A2CZJZGLK2JJVM").utf8)
+        Data((self + "#" + DeviceRegistration.deviceType).utf8)
             .map { String(format: "%02x", $0) }
             .joined()
     }

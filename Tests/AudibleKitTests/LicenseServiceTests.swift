@@ -8,12 +8,14 @@ struct LicenseServiceTests {
 
     static let serial = "0123456789ABCDEF0123456789ABCDEF01234567"
     static let asin = "B0TEST0001"
+    static let customerID = "amzn1.account.TEST"
 
     /// Builds a voucher the same way the server does, so the test proves the
     /// decrypt path end to end without a recorded secret.
     static func makeVoucher(key: String, iv: String) throws -> String {
         let plaintext = Data(#"{"key":"\#(key)","iv":"\#(iv)","refresh_date":"2027-01-01"}"#.utf8)
-        let material = Data(SHA256.hash(data: Data((serial + asin).utf8)))
+        let material = Data(SHA256.hash(data: Data(
+            (DeviceRegistration.deviceType + serial + customerID + asin).utf8)))
         let ciphertext = try AES.cbcEncrypt(
             plaintext, key: material.prefix(16), iv: material.suffix(16))
         return ciphertext.base64EncodedString()
@@ -49,7 +51,7 @@ struct LicenseServiceTests {
         let body = Self.licenseBody(voucher: try Self.makeVoucher(key: keyHex, iv: ivHex))
 
         let license = try LicenseService.parse(
-            body, asin: Self.asin, deviceSerial: Self.serial)
+            body, asin: Self.asin, deviceSerial: Self.serial, customerID: Self.customerID)
 
         #expect(license.downloadURL.host == "example.invalid")
         #expect(license.keyHex == keyHex)
@@ -65,7 +67,7 @@ struct LicenseServiceTests {
                 key: String(repeating: "ab", count: 16),
                 iv: String(repeating: "cd", count: 16)))
         let license = try LicenseService.parse(
-            body, asin: Self.asin, deviceSerial: Self.serial)
+            body, asin: Self.asin, deviceSerial: Self.serial, customerID: Self.customerID)
 
         #expect(license.chapters.count == 2)
         #expect(license.chapters[0].title == "Opening Credits")
@@ -81,7 +83,7 @@ struct LicenseServiceTests {
                 key: String(repeating: "ab", count: 16),
                 iv: String(repeating: "cd", count: 16)))
         let license = try LicenseService.parse(
-            body, asin: Self.asin, deviceSerial: Self.serial)
+            body, asin: Self.asin, deviceSerial: Self.serial, customerID: Self.customerID)
         #expect(license.lastPositionHeard == 372)
     }
 
@@ -93,7 +95,8 @@ struct LicenseServiceTests {
                 iv: String(repeating: "cd", count: 16)))
         #expect(throws: AudibleError.self) {
             _ = try LicenseService.parse(
-                body, asin: Self.asin, deviceSerial: "SOMEOTHERDEVICESERIAL00000000000000000000")
+                body, asin: Self.asin, deviceSerial: "SOMEOTHERDEVICESERIAL00000000000000000000",
+                customerID: Self.customerID)
         }
     }
 
@@ -103,7 +106,7 @@ struct LicenseServiceTests {
         {"content_license": {"status_code": "Denied", "message": "Not entitled"}}
         """.utf8)
         #expect(throws: AudibleError.licenseDenied(asin: Self.asin, reason: "Not entitled")) {
-            _ = try LicenseService.parse(body, asin: Self.asin, deviceSerial: Self.serial)
+            _ = try LicenseService.parse(body, asin: Self.asin, deviceSerial: Self.serial, customerID: Self.customerID)
         }
     }
 
@@ -113,7 +116,7 @@ struct LicenseServiceTests {
         {"content_license": {"status_code": "Granted", "license_response": "x"}}
         """.utf8)
         #expect(throws: AudibleError.self) {
-            _ = try LicenseService.parse(body, asin: Self.asin, deviceSerial: Self.serial)
+            _ = try LicenseService.parse(body, asin: Self.asin, deviceSerial: Self.serial, customerID: Self.customerID)
         }
     }
 
@@ -129,6 +132,40 @@ struct LicenseServiceTests {
     func rejectsOddHex() {
         #expect(Data(hexString: "abc") == nil)
         #expect(Data(hexString: "zz") == nil)
+    }
+
+    @Test("A voucher issued to another customer does not open")
+    func rejectsForeignCustomer() throws {
+        let body = Self.licenseBody(
+            voucher: try Self.makeVoucher(
+                key: String(repeating: "ab", count: 16),
+                iv: String(repeating: "cd", count: 16)))
+        #expect(throws: AudibleError.self) {
+            _ = try LicenseService.parse(
+                body, asin: Self.asin, deviceSerial: Self.serial,
+                customerID: "amzn1.account.SOMEONEELSE")
+        }
+    }
+
+    @Test("A voucher for another title does not open")
+    func rejectsForeignASIN() throws {
+        let body = Self.licenseBody(
+            voucher: try Self.makeVoucher(
+                key: String(repeating: "ab", count: 16),
+                iv: String(repeating: "cd", count: 16)))
+        #expect(throws: AudibleError.self) {
+            _ = try LicenseService.parse(
+                body, asin: "B0DIFFERENT", deviceSerial: Self.serial,
+                customerID: Self.customerID)
+        }
+    }
+
+    @Test("Trailing bytes after the voucher JSON are ignored")
+    func readsJSONWithTrailingBytes() throws {
+        var data = Data(#"{"key":"ab","iv":"cd"}"#.utf8)
+        data.append(contentsOf: [0x07, 0x07, 0x07, 0x00])
+        let root = try #require(LicenseService.readJSON(data))
+        #expect(root["key"] as? String == "ab")
     }
 
     @Test("AES-CBC round-trips")

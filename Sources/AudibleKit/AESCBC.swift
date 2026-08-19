@@ -2,11 +2,19 @@ import Foundation
 import CommonCrypto
 
 extension AES {
-    /// Decrypts AES-CBC with PKCS#7 padding.
+    /// Decrypts AES-CBC.
     ///
     /// CryptoKit offers GCM only, and the Audible voucher is CBC, so this uses
     /// CommonCrypto directly.
-    static func cbcDecrypt(_ ciphertext: Data, key: Data, iv: Data) throws -> Data {
+    ///
+    /// - Parameter padded: Whether the plaintext carries PKCS#7 padding. A
+    ///   voucher does not, and asking for padding on unpadded data fails.
+    static func cbcDecrypt(
+        _ ciphertext: Data,
+        key: Data,
+        iv: Data,
+        padded: Bool = true
+    ) throws -> Data {
         guard key.count == kCCKeySizeAES128 || key.count == kCCKeySizeAES256 else {
             throw AudibleError.decryptFailed("The voucher key is \(key.count) bytes.")
         }
@@ -25,7 +33,7 @@ extension AES {
                         CCCrypt(
                             CCOperation(kCCDecrypt),
                             CCAlgorithm(kCCAlgorithmAES),
-                            CCOptions(kCCOptionPKCS7Padding),
+                            CCOptions(padded ? kCCOptionPKCS7Padding : 0),
                             keyBytes.baseAddress, key.count,
                             ivBytes.baseAddress,
                             inputBytes.baseAddress, ciphertext.count,

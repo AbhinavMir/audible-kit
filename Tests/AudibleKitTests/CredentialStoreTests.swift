@@ -83,3 +83,57 @@ struct LegacyCredentialTests {
         #expect(reread.marketplace == .uk)
     }
 }
+
+@Suite("File credential storage")
+struct FileCredentialStoreTests {
+
+    static func temporaryStore() -> (FileCredentialStore, URL) {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("creds-\(UUID().uuidString).json")
+        return (FileCredentialStore(fileURL: url), url)
+    }
+
+    @Test("An identity survives a save and a fresh read")
+    func roundTrip() throws {
+        let (store, url) = Self.temporaryStore()
+        try store.save(.testIdentity(marketplace: .germany))
+
+        let reader = FileCredentialStore(fileURL: url)
+        let restored = try #require(try reader.load())
+        #expect(restored.marketplace == .germany)
+        #expect(restored.customerID == "amzn1.account.TEST")
+    }
+
+    @Test("The file is readable by its owner only")
+    func filePermissions() throws {
+        let (store, url) = Self.temporaryStore()
+        try store.save(.testIdentity())
+        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+        #expect(attributes[.posixPermissions] as? NSNumber == 0o600)
+    }
+
+    @Test("Reading twice touches the disk once")
+    func cachesAfterFirstRead() throws {
+        let (store, url) = Self.temporaryStore()
+        try store.save(.testIdentity())
+        _ = try store.load()
+        // Removing the file cannot affect a store that already read it.
+        try FileManager.default.removeItem(at: url)
+        #expect(try store.load() != nil)
+    }
+
+    @Test("Clearing removes the file")
+    func clearRemovesFile() throws {
+        let (store, url) = Self.temporaryStore()
+        try store.save(.testIdentity())
+        try store.clear()
+        #expect(!FileManager.default.fileExists(atPath: url.path))
+        #expect(try store.load() == nil)
+    }
+
+    @Test("An absent file is not an error")
+    func absentFileLoadsNil() throws {
+        let (store, _) = Self.temporaryStore()
+        #expect(try store.load() == nil)
+    }
+}
