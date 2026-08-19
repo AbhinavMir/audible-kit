@@ -34,14 +34,28 @@ struct DeviceRegistrationTests {
         #expect(values["openid.oa2.code_challenge"]?.isEmpty == false)
     }
 
-    @Test("The code challenge is the SHA-256 of the verifier, base64url encoded")
+    @Test("The challenge is the hash of the verifier text the server receives")
     func codeChallengeMatchesVerifier() throws {
         let attempt = DeviceRegistration(marketplace: .us).signInAttempt()
         let items = try #require(
             URLComponents(url: attempt.url, resolvingAgainstBaseURL: false)?.queryItems)
         let challenge = try #require(
             items.first { $0.name == "openid.oa2.code_challenge" }?.value)
-        #expect(challenge == attempt.codeVerifier.sha256.base64URLEncodedString())
+
+        // The server hashes the verifier string it is given. Hashing anything
+        // else here, such as the bytes the string was built from, makes the
+        // server reject the registration as an invalid value.
+        let serverSide = Data(attempt.codeVerifier.utf8).sha256.base64URLEncodedString()
+        #expect(challenge == serverSide)
+    }
+
+    @Test("The verifier is text that survives a round trip through a request")
+    func verifierIsPlainText() {
+        let verifier = DeviceRegistration(marketplace: .us).signInAttempt().codeVerifier
+        #expect(verifier.count >= 43)
+        #expect(!verifier.contains("+"))
+        #expect(!verifier.contains("/"))
+        #expect(!verifier.contains("="))
     }
 
     @Test("Base64url output drops padding and swaps the two alphabet characters")

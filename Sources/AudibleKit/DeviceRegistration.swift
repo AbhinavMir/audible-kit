@@ -21,15 +21,22 @@ public struct DeviceRegistration: Sendable {
     /// arrives: the verifier and serial must match across both halves.
     public struct Attempt: Sendable {
         public let url: URL
-        public let codeVerifier: Data
+        /// The PKCE verifier, as the string that is both sent to the server and
+        /// hashed to make the challenge. It must be the same text in both
+        /// places, or the server rejects the registration.
+        public let codeVerifier: String
         public let serial: String
     }
 
     /// Builds the Amazon sign-in URL for a new registration.
     public func signInAttempt() -> Attempt {
         let serial = DeviceRegistration.generateSerial()
-        let verifier = DeviceRegistration.randomBytes(32)
-        let challenge = verifier.sha256.base64URLEncodedString()
+        // PKCE: the challenge is the hash of the verifier *text*, not of the
+        // bytes the text was made from. The server repeats this calculation
+        // over the verifier it receives, so both sides must hash the same
+        // thing.
+        let verifier = DeviceRegistration.randomBytes(32).base64URLEncodedString()
+        let challenge = Data(verifier.utf8).sha256.base64URLEncodedString()
 
         var components = URLComponents()
         components.scheme = "https"
@@ -102,7 +109,7 @@ public struct DeviceRegistration: Sendable {
             "auth_data": [
                 "client_id": attempt.serial.deviceClientID,
                 "authorization_code": code,
-                "code_verifier": String(data: attempt.codeVerifier.base64URLEncoded, encoding: .utf8) ?? "",
+                "code_verifier": attempt.codeVerifier,
                 "code_algorithm": "SHA-256",
                 "client_domain": "DeviceLegacy"
             ],
@@ -115,11 +122,19 @@ public struct DeviceRegistration: Sendable {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
+        Log.write("Registering device \(attempt.serial.prefix(8))… "
+                  + "on \(marketplace.countryCode), "
+                  + "code \(Log.redacted(code)), "
+                  + "verifier \(Log.redacted(attempt.codeVerifier))")
+
         let (data, response) = try await transport.send(request)
         guard response.statusCode == 200 else {
-            throw AudibleError.registrationFailed(
-                Self.explain(status: response.statusCode, body: data))
+            let reason = Self.explain(status: response.statusCode, body: data)
+            Log.write("Registration refused with HTTP \(response.statusCode): \(reason)")
+            Log.write("Full response: \(String(data: data, encoding: .utf8) ?? "unreadable")")
+            throw AudibleError.registrationFailed(reason)
         }
+        Log.write("Registration accepted.")
         return try Self.identity(
             fromRegistrationResponse: data,
             serial: attempt.serial,
