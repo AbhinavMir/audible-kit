@@ -57,3 +57,41 @@ enum Fixtures {
     }
     """.utf8)
 }
+
+extension Fixtures {
+    /// One page of a library response. Values are invented.
+    static let libraryPage = Data("""
+    {
+      "items": [
+        {
+          "asin": "B0TEST0001",
+          "title": "The Long Walk Home",
+          "subtitle": "A Novel",
+          "authors": [{"name": "Ada Marsh"}],
+          "narrators": [{"name": "Colin Reeve"}, {"name": "Jean Okoro"}],
+          "series_primary": {"asin": "B0SERIES1", "title": "Wayfarer", "sequence": "2"},
+          "publisher_name": "Harbour Audio",
+          "runtime_length_min": 611,
+          "release_date": "2024-03-12",
+          "purchase_date": "2025-11-02T09:14:23.000Z",
+          "product_images": {
+            "500": "https://example.invalid/cover500.jpg",
+            "1215": "https://example.invalid/cover1215.jpg"
+          },
+          "is_finished": true
+        },
+        {
+          "asin": "B0TEST0002",
+          "title": "Sparse Record",
+          "purchase_date": "2025-11-03T09:14:23.000Z"
+        }
+      ]
+    }
+    """.utf8)
+
+    static let emptyLibraryPage = Data(#"{"items": []}"#.utf8)
+
+    static let refreshedToken = Data("""
+    {"access_token": "Atna|refreshed", "expires_in": 3600, "token_type": "bearer"}
+    """.utf8)
+}
