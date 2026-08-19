@@ -55,6 +55,20 @@ struct DecryptServiceTests {
         try DecryptService().verify(file, against: 5)
     }
 
+    @Test("A file that runs longer than the library claims is accepted")
+    func acceptsLongerFile() throws {
+        // Reported runtimes are rounded to whole minutes and often omit
+        // credits, so a correct file frequently runs minutes longer.
+        guard let file = try Self.makeFixtureAudio(seconds: 10) else { return }
+        try DecryptService().verify(file, against: 8)
+    }
+
+    @Test("A file a little shorter than claimed is still accepted")
+    func acceptsSlightlyShorterFile() throws {
+        guard let file = try Self.makeFixtureAudio(seconds: 10) else { return }
+        try DecryptService().verify(file, against: 10.4)
+    }
+
     @Test("A truncated file is rejected and deleted")
     func rejectsAndDeletesShortFile() throws {
         guard let source = try Self.makeFixtureAudio(seconds: 5) else { return }

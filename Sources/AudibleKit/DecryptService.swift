@@ -76,12 +76,14 @@ public struct DecryptService: Sendable {
         process.standardError = errors
         process.standardOutput = Pipe()
 
+        Log.write("Decrypting \(source.lastPathComponent) to \(destination.lastPathComponent)")
         try process.run()
         let errorText = String(
             data: errors.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
         process.waitUntilExit()
 
         guard process.terminationStatus == 0 else {
+            Log.write("ffmpeg failed with status \(process.terminationStatus): \(errorText)")
             try? FileManager.default.removeItem(at: destination)
             throw AudibleError.decryptFailed(
                 errorText.isEmpty
@@ -96,19 +98,31 @@ public struct DecryptService: Sendable {
 
     /// Checks the decrypted file against the length the library reported.
     ///
-    /// A file that stops early plays as a truncated book, which is worse than
-    /// no file at all, so a mismatch deletes the output.
+    /// The check exists to catch a file that stops early, which plays as a
+    /// truncated book. It is deliberately loose: the reported runtime is
+    /// rounded to whole minutes and often omits credits, so a real file can
+    /// run several minutes longer than the library claims. Only a file that is
+    /// clearly short is treated as a failure, and a file that runs long is
+    /// always accepted.
+    static let shortestAcceptedShare = 0.95
+
     func verify(_ file: URL, against expectedDuration: TimeInterval) throws {
         guard let actual = duration(of: file) else {
             try? FileManager.default.removeItem(at: file)
             throw AudibleError.decryptFailed("The decrypted file reports no duration.")
         }
-        let difference = abs(actual - expectedDuration)
-        guard difference <= 60 else {
+
+        let shortest = expectedDuration * DecryptService.shortestAcceptedShare
+        Log.write("Decrypted file runs \(Int(actual))s; "
+                  + "the library reports \(Int(expectedDuration))s; "
+                  + "the shortest accepted is \(Int(shortest))s.")
+
+        guard actual >= shortest else {
             try? FileManager.default.removeItem(at: file)
             throw AudibleError.decryptFailed(
-                "The decrypted file is \(Int(actual)) seconds long, "
-                + "but the library reports \(Int(expectedDuration)).")
+                "The decrypted file is \(Int(actual / 60)) minutes long, "
+                + "but the library reports \(Int(expectedDuration / 60)). "
+                + "The download stopped early.")
         }
     }
 

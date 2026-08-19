@@ -32,6 +32,16 @@ public actor DownloadService {
         to destination: URL,
         onProgress: (@Sendable (Progress) -> Void)? = nil
     ) async throws {
+        // A complete file from an earlier attempt is reused. A large title
+        // costs too much to fetch twice because a later step failed.
+        if let existing = FileManager.default.fileSize(at: destination),
+           let remote = try? await size(of: license.downloadURL),
+           existing == remote {
+            Log.write("Reusing the \(existing / 1_048_576) MB file already on disk.")
+            onProgress?(Progress(bytesReceived: existing, bytesExpected: existing))
+            return
+        }
+
         let partial = destination.appendingPathExtension("part")
         let alreadyHave = FileManager.default.fileSize(at: partial) ?? 0
 
@@ -98,9 +108,23 @@ public actor DownloadService {
     }
 }
 
+extension DownloadService {
+    /// Asks the server how large the file is, without fetching it.
+    func size(of url: URL) async throws -> Int64? {
+        var request = URLRequest(url: url)
+        request.httpMethod = "HEAD"
+        request.timeoutInterval = 20
+        let (_, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse,
+              let length = http.value(forHTTPHeaderField: "Content-Length")
+        else { return nil }
+        return Int64(length)
+    }
+}
+
 extension FileManager {
     /// Size of the file at `url`, or nil when there is no file there.
-    func fileSize(at url: URL) -> Int64? {
+    public func fileSize(at url: URL) -> Int64? {
         guard let attributes = try? attributesOfItem(atPath: url.path),
               let size = attributes[.size] as? NSNumber
         else { return nil }
