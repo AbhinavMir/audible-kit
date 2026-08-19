@@ -91,9 +91,32 @@ both are copyleft, and this package is MIT.
 
 ## Status
 
-Registration, signing, library listing, licensing, download, decryption, and
-position reads are implemented and unit tested. The position **write** endpoint
-still needs confirmation against a live account.
+Verified against a real account: device registration, request signing, library
+listing (66 titles), content licensing, voucher decryption, and a download of
+a 32-hour title.
+
+Position reads follow the documented endpoint. The position **write** endpoint
+is implemented but has not been confirmed against a live account yet.
+
+The package covers titles an account owns. Podcasts, Audible Plus streaming,
+and purchases are out of scope.
+
+## Notes for anyone reading the protocol code
+
+Three parts are easy to get wrong, and each fails in a way that does not say
+what is wrong:
+
+- **The PKCE challenge** hashes the verifier *text*, not the bytes the text was
+  built from. Hashing the wrong thing gives "one or more provided values are
+  invalid".
+- **The voucher key** is one SHA-256 over the device type, the device serial,
+  the customer identifier, and the ASIN, in that order. Miss any one and the
+  voucher will not open. The voucher is not padded.
+- **The request signature** covers the method, the path with query, the
+  timestamp, the body, and the ADP token, joined with newlines. A wrong
+  signature returns a bare 401 with no explanation.
+
+Each has a test that pins the behaviour.
 
 ## License
 
