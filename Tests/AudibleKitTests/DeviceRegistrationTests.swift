@@ -136,3 +136,23 @@ struct DeviceRegistrationTests {
         #expect(identity.accessTokenNeedsRefresh)
     }
 }
+
+@Suite("Device naming")
+struct DeviceNamingTests {
+
+    @Test("A device name carries part of the serial, so it cannot collide")
+    func nameIncludesSerial() {
+        let name = DeviceRegistration.uniqueName(
+            "Earmark on Mac", serial: "FF13CD582EC6C3C28BD2AEF4899D94FED60191B5")
+        #expect(name == "Earmark on Mac (FF13CD)")
+    }
+
+    @Test("Two attempts never produce the same name")
+    func namesDiffer() {
+        let first = DeviceRegistration.uniqueName(
+            "Earmark", serial: DeviceRegistration.generateSerial())
+        let second = DeviceRegistration.uniqueName(
+            "Earmark", serial: DeviceRegistration.generateSerial())
+        #expect(first != second)
+    }
+}

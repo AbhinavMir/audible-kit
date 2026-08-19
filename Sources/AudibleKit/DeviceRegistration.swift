@@ -84,12 +84,16 @@ public struct DeviceRegistration: Sendable {
     /// - Parameters:
     ///   - code: The value `authorizationCode(in:)` returned.
     ///   - attempt: The attempt that produced the sign-in URL.
-    ///   - deviceName: The name shown in the account's device list.
+    ///   - deviceName: The name shown in the account's device list. A short
+    ///     part of the serial is added to it, because Amazon refuses a name
+    ///     that an existing device already has, and a failed attempt can leave
+    ///     the name taken.
     public func register(
         code: String,
         attempt: Attempt,
         deviceName: String
     ) async throws -> DeviceIdentity {
+        let uniqueName = DeviceRegistration.uniqueName(deviceName, serial: attempt.serial)
         let body: [String: Any] = [
             "requested_token_type": [
                 "bearer", "mac_dms", "website_cookies", "store_authentication_cookie"
@@ -100,7 +104,7 @@ public struct DeviceRegistration: Sendable {
                 "app_version": "3.56.2",
                 "device_serial": attempt.serial,
                 "device_type": "A2CZJZGLK2JJVM",
-                "device_name": deviceName,
+                "device_name": uniqueName,
                 "os_version": "16.6",
                 "software_version": "35602678",
                 "device_model": "Mac",
@@ -122,7 +126,8 @@ public struct DeviceRegistration: Sendable {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        Log.write("Registering device \(attempt.serial.prefix(8))… "
+        Log.write("Registering '\(uniqueName)' "
+                  + "with serial \(attempt.serial.prefix(8))… "
                   + "on \(marketplace.countryCode), "
                   + "code \(Log.redacted(code)), "
                   + "verifier \(Log.redacted(attempt.codeVerifier))")
@@ -201,6 +206,15 @@ public struct DeviceRegistration: Sendable {
     }
 
     // MARK: Device serial
+
+    /// Adds a short part of the serial to a device name.
+    ///
+    /// Amazon rejects a registration whose device name matches one already on
+    /// the account, and a name is taken as soon as one attempt succeeds. The
+    /// serial is unique per attempt, so the name is too.
+    static func uniqueName(_ name: String, serial: String) -> String {
+        "\(name) (\(serial.prefix(6)))"
+    }
 
     /// Audible device serials are 40 uppercase hexadecimal characters.
     static func generateSerial() -> String {
