@@ -1,0 +1,109 @@
+import Foundation
+
+/// Fetches the encrypted audio file a license points at.
+public actor DownloadService {
+    private let session: URLSession
+
+    public init(session: URLSession = .shared) {
+        self.session = session
+    }
+
+    /// How far a download has progressed.
+    public struct Progress: Sendable {
+        public let bytesReceived: Int64
+        /// Total size, when the server reported one.
+        public let bytesExpected: Int64?
+
+        /// Completed share, from 0 to 1. Nil while the total is unknown.
+        public var fraction: Double? {
+            guard let bytesExpected, bytesExpected > 0 else { return nil }
+            return Double(bytesReceived) / Double(bytesExpected)
+        }
+    }
+
+    /// Downloads the licensed file to `destination`.
+    ///
+    /// The file is written as it arrives, so a large title never sits in memory.
+    /// A partial file left by an earlier attempt is resumed by range request.
+    ///
+    /// - Parameter onProgress: Called as bytes arrive. Runs off the main actor.
+    public func download(
+        _ license: ContentLicense,
+        to destination: URL,
+        onProgress: (@Sendable (Progress) -> Void)? = nil
+    ) async throws {
+        let partial = destination.appendingPathExtension("part")
+        let alreadyHave = FileManager.default.fileSize(at: partial) ?? 0
+
+        var request = URLRequest(url: license.downloadURL)
+        request.timeoutInterval = 60
+        if alreadyHave > 0 {
+            request.setValue("bytes=\(alreadyHave)-", forHTTPHeaderField: "Range")
+        }
+
+        let (stream, response) = try await session.bytes(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw AudibleError.downloadFailed("The response was not HTTP.")
+        }
+
+        // A server that ignores the range restarts the file, so the partial
+        // file must be discarded rather than appended to.
+        let resuming = http.statusCode == 206
+        guard http.statusCode == 200 || resuming else {
+            throw AudibleError.downloadFailed("The server returned HTTP \(http.statusCode).")
+        }
+        if !resuming, alreadyHave > 0 {
+            try? FileManager.default.removeItem(at: partial)
+        }
+
+        let expected = http.expectedContentLength > 0
+            ? http.expectedContentLength + (resuming ? alreadyHave : 0)
+            : nil
+
+        try FileManager.default.createDirectory(
+            at: destination.deletingLastPathComponent(),
+            withIntermediateDirectories: true)
+        if !FileManager.default.fileExists(atPath: partial.path) {
+            FileManager.default.createFile(atPath: partial.path, contents: nil)
+        }
+
+        let handle = try FileHandle(forWritingTo: partial)
+        defer { try? handle.close() }
+        try handle.seekToEnd()
+
+        var received = resuming ? alreadyHave : 0
+        var buffer = Data()
+        buffer.reserveCapacity(1 << 20)
+
+        for try await byte in stream {
+            buffer.append(byte)
+            if buffer.count >= 1 << 20 {
+                try handle.write(contentsOf: buffer)
+                received += Int64(buffer.count)
+                buffer.removeAll(keepingCapacity: true)
+                onProgress?(Progress(bytesReceived: received, bytesExpected: expected))
+            }
+        }
+        if !buffer.isEmpty {
+            try handle.write(contentsOf: buffer)
+            received += Int64(buffer.count)
+        }
+        try handle.close()
+        onProgress?(Progress(bytesReceived: received, bytesExpected: expected))
+
+        if FileManager.default.fileExists(atPath: destination.path) {
+            try FileManager.default.removeItem(at: destination)
+        }
+        try FileManager.default.moveItem(at: partial, to: destination)
+    }
+}
+
+extension FileManager {
+    /// Size of the file at `url`, or nil when there is no file there.
+    func fileSize(at url: URL) -> Int64? {
+        guard let attributes = try? attributesOfItem(atPath: url.path),
+              let size = attributes[.size] as? NSNumber
+        else { return nil }
+        return size.int64Value
+    }
+}

@@ -27,6 +27,8 @@ public actor AudibleClient {
     public var marketplace: AudibleMarketplace { identity.marketplace }
     /// The signed-in customer.
     public var customerID: String { identity.customerID }
+    /// The serial this device registered with. The voucher key derives from it.
+    public var deviceSerialNumber: String { identity.deviceSerialNumber }
 
     // MARK: Requests
 
