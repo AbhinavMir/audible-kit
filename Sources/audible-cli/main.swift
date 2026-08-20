@@ -158,6 +158,67 @@ final class ProgressReporter: @unchecked Sendable {
     }
 }
 
+/// Sends one signed request with a body, and prints the reply.
+func sendRequest(method: String, path: String, body: String) async {
+    let client = makeClient()
+    // A path may carry its own query, so that a request can be tried exactly
+    // as written.
+    let halves = path.split(separator: "?", maxSplits: 1)
+    var parameters: [String: String] = [:]
+    if halves.count == 2 {
+        for pair in halves[1].split(separator: "&") {
+            let sides = pair.split(separator: "=", maxSplits: 1)
+            if sides.count == 2 { parameters[String(sides[0])] = String(sides[1]) }
+        }
+    }
+    let cleanPath = String(halves[0])
+
+    do {
+        let data = try await client.send(
+            method: method.uppercased(),
+            path: cleanPath.hasPrefix("1.0/") ? String(cleanPath.dropFirst(4)) : cleanPath,
+            query: parameters,
+            body: body.isEmpty ? nil : Data(body.utf8))
+        print(String(data: data, encoding: .utf8) ?? "empty reply")
+    } catch {
+        print("ERROR \(error.localizedDescription)")
+    }
+}
+
+/// Sends one signed GET and reports what came back.
+///
+/// Used to find out which parts of the API an account can reach, without
+/// changing anything.
+func showEndpoint(path: String, query: String) async {
+    let client = makeClient()
+    var parameters: [String: String] = [:]
+    for pair in query.split(separator: "&") {
+        let halves = pair.split(separator: "=", maxSplits: 1)
+        if halves.count == 2 { parameters[String(halves[0])] = String(halves[1]) }
+    }
+
+    do {
+        let data = try await client.send(
+            method: "GET",
+            path: path.hasPrefix("1.0/") ? String(path.dropFirst(4)) : path,
+            query: parameters,
+            body: nil)
+        let root = try JSONSerialization.jsonObject(with: data)
+        if let object = root as? [String: Any] {
+            print("OK  keys: \(object.keys.sorted().joined(separator: ", "))")
+            for (key, value) in object.sorted(by: { $0.key < $1.key }) {
+                if let list = value as? [Any] {
+                    print("    \(key): \(list.count) items")
+                }
+            }
+        } else {
+            print("OK  \(String(data: data, encoding: .utf8)?.prefix(200) ?? "")")
+        }
+    } catch {
+        print("--  \(error.localizedDescription)")
+    }
+}
+
 /// Tries several license request shapes and reports what each returns.
 ///
 /// The server chooses the delivery format from what the client says it
@@ -293,6 +354,15 @@ case "raw":
 case "probe":
     guard arguments.count > 1 else { fail("Give an ASIN.") }
     await probeLicenseShapes(asin: arguments[1])
+case "get":
+    guard arguments.count > 1 else { fail("Give a path, such as 1.0/wishlist.") }
+    await showEndpoint(path: arguments[1], query: arguments.count > 2 ? arguments[2] : "")
+case "send":
+    guard arguments.count > 2 else { fail("Give a method, a path, and a body.") }
+    await sendRequest(
+        method: arguments[1],
+        path: arguments[2],
+        body: arguments.count > 3 ? arguments[3] : "")
 case "logout":
     try? store.clear()
     print("Credentials cleared.")

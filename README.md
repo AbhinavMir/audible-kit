@@ -76,6 +76,18 @@ swift run audible-cli positions
 swift run audible-cli download B0TEST0001 ~/Audiobooks
 ```
 
+Collections are the only organisation Audible itself stores, so a shelf made
+here appears in the mobile application.
+
+```swift
+let collections = CollectionService(client: client)
+let reading = try await collections.create(name: "Reading")
+try await collections.add(["B0TEST0001"], to: reading.id)
+let asins = try await collections.items(in: reading.id)
+try await collections.remove("B0TEST0001", from: reading.id)
+try await collections.delete(reading.id)
+```
+
 ## Design notes
 
 `AudibleClient` is the only type that touches the network. Every service takes
@@ -110,6 +122,14 @@ Streaming is verified against a real account: ffmpeg reads the encrypted file
 over the network, decrypts it, and the resulting segments decode as AAC with
 no errors.
 
+Collections are verified against a real account: create, add eight titles,
+list, remove them one at a time down to zero, rename, and delete.
+
+What the API does not offer: there is no way to remove a title from a library,
+and no recommendations, similar titles, or reviews for an account. A library is
+append-only from a client's side, so anything else a person would call
+management has to live in the client.
+
 Position reads follow the documented endpoint. The position **write** endpoint
 is implemented but has not been confirmed against a live account yet.
 
@@ -130,6 +150,10 @@ what is wrong:
 - **The request signature** covers the method, the path with query, the
   timestamp, the body, and the ADP token, joined with newlines. A wrong
   signature returns a bare 401 with no explanation.
+- **Removing a title from a collection puts the ASIN in the query**, as
+  `DELETE .../items?asins=<asin>`. The same call with the ASIN in the path is
+  refused, and with the ASIN in a body it fails inside the gateway. Adding a
+  title with an `action` of `remove` adds it a second time.
 - **Every request for audio must carry the Audible user agent.** The delivery
   network refuses any other client with 403 and the words "request blocked",
   however valid the signed URL is. ffmpeg's own agent is refused, so a stream
