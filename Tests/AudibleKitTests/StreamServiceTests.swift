@@ -77,3 +77,23 @@ struct StreamServiceTests {
         #expect((response as? HTTPURLResponse)?.statusCode != 200)
     }
 }
+
+@Suite("Delivery network requirements")
+struct DeliveryHeaderTests {
+
+    @Test("A stream claims to be the Audible application")
+    func streamSendsTheUserAgent() {
+        // The delivery network answers 403 with "request blocked" for any
+        // other agent, including ffmpeg's own.
+        let arguments = StreamService.arguments(for: StreamServiceTests.license, from: 0)
+        let flag = try! #require(arguments.firstIndex(of: "-user_agent"))
+        #expect(arguments[flag + 1] == URLSessionTransport.userAgent)
+        #expect(URLSessionTransport.userAgent.hasPrefix("Audible/"))
+    }
+
+    @Test("A stream recovers from a dropped connection")
+    func streamReconnects() {
+        let arguments = StreamService.arguments(for: StreamServiceTests.license, from: 0)
+        #expect(arguments.contains("-reconnect"))
+    }
+}

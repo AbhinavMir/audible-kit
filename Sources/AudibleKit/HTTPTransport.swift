@@ -30,7 +30,11 @@ public struct URLSessionTransport: HTTPTransport {
     }
 
     /// Matches the Audible application the registration payload claims to be.
-    static let userAgent = "Audible/671 CFNetwork/1240.0.4 Darwin/20.6.0"
+    ///
+    /// The content delivery network refuses a request that does not look like
+    /// the Audible application, whatever the signed URL says, so every request
+    /// for audio must carry this.
+    public static let userAgent = "Audible/671 CFNetwork/1240.0.4 Darwin/20.6.0"
 }
 
 extension Data {

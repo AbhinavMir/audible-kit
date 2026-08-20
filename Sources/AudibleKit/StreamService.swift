@@ -99,6 +99,12 @@ public final class StreamService: @unchecked Sendable {
     static func arguments(for license: ContentLicense, from offset: TimeInterval) -> [String] {
         var arguments = [
             "-nostdin", "-hide_banner", "-loglevel", "error",
+            // The delivery network blocks ffmpeg's own agent with a 403 that
+            // says only "request blocked".
+            "-user_agent", URLSessionTransport.userAgent,
+            "-reconnect", "1",
+            "-reconnect_streamed", "1",
+            "-reconnect_delay_max", "5",
             "-audible_key", license.keyHex,
             "-audible_iv", license.ivHex
         ]

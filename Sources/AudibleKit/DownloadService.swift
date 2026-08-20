@@ -47,6 +47,9 @@ public actor DownloadService {
 
         var request = URLRequest(url: license.downloadURL)
         request.timeoutInterval = 60
+        // Without this the delivery network answers 403 and says only
+        // "request blocked", whatever the signed URL says.
+        request.setValue(URLSessionTransport.userAgent, forHTTPHeaderField: "User-Agent")
         if alreadyHave > 0 {
             request.setValue("bytes=\(alreadyHave)-", forHTTPHeaderField: "Range")
         }
@@ -114,6 +117,7 @@ extension DownloadService {
         var request = URLRequest(url: url)
         request.httpMethod = "HEAD"
         request.timeoutInterval = 20
+        request.setValue(URLSessionTransport.userAgent, forHTTPHeaderField: "User-Agent")
         let (_, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse,
               let length = http.value(forHTTPHeaderField: "Content-Length")

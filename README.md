@@ -106,8 +106,9 @@ Verified against a real account: device registration, request signing, library
 listing, content licensing, voucher decryption, and a download of a 32-hour
 title that decrypted to a playable M4B.
 
-Streaming is implemented and unit tested. It has not yet been confirmed against
-a live account.
+Streaming is verified against a real account: ffmpeg reads the encrypted file
+over the network, decrypts it, and the resulting segments decode as AAC with
+no errors.
 
 Position reads follow the documented endpoint. The position **write** endpoint
 is implemented but has not been confirmed against a live account yet.
@@ -129,6 +130,10 @@ what is wrong:
 - **The request signature** covers the method, the path with query, the
   timestamp, the body, and the ADP token, joined with newlines. A wrong
   signature returns a bare 401 with no explanation.
+- **Every request for audio must carry the Audible user agent.** The delivery
+  network refuses any other client with 403 and the words "request blocked",
+  however valid the signed URL is. ffmpeg's own agent is refused, so a stream
+  must set `-user_agent`.
 
 Each has a test that pins the behaviour.
 

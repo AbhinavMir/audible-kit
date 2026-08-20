@@ -12,7 +12,9 @@ import AudibleKit
 ///     audible-cli download <ASIN> [directory]
 ///     audible-cli logout
 
-let store = KeychainCredentialStore()
+// The same store the application uses, so the tool needs no separate sign-in
+// and asks for nothing.
+let store = MigratingCredentialStore()
 
 func fail(_ message: String) -> Never {
     FileHandle.standardError.write(Data("Error: \(message)\n".utf8))
@@ -156,6 +158,109 @@ final class ProgressReporter: @unchecked Sendable {
     }
 }
 
+/// Tries several license request shapes and reports what each returns.
+///
+/// The server chooses the delivery format from what the client says it
+/// supports. Which combination yields the modern format is not documented.
+func probeLicenseShapes(asin: String) async {
+    let client = makeClient()
+    let shapes: [(String, [String: Any])] = [
+        ("Mpeg+Adrm, High", [
+            "supported_drm_types": ["Mpeg", "Adrm"], "quality": "High"]),
+        ("Adrm only, High", [
+            "supported_drm_types": ["Adrm"], "quality": "High"]),
+        ("Mpeg only, High", [
+            "supported_drm_types": ["Mpeg"], "quality": "High"]),
+        ("Mpeg+Adrm, Extreme", [
+            "supported_drm_types": ["Mpeg", "Adrm"], "quality": "Extreme"]),
+        ("Adrm, Extreme, adaptive", [
+            "supported_drm_types": ["Adrm"], "quality": "Extreme",
+            "use_adaptive_bit_rate": true]),
+        ("Adrm, High, spatial off", [
+            "supported_drm_types": ["Adrm"], "quality": "High",
+            "spatial": false, "use_adaptive_bit_rate": false])
+    ]
+
+    for (name, extra) in shapes {
+        var body: [String: Any] = [
+            "consumption_type": "Download",
+            "response_groups": "content_reference"
+        ]
+        for (key, value) in extra { body[key] = value }
+
+        do {
+            let data = try await client.send(
+                method: "POST",
+                path: "content/\(asin)/licenserequest",
+                body: try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys]))
+            let root = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            let license = root?["content_license"] as? [String: Any] ?? [:]
+            let reference = (license["content_metadata"] as? [String: Any])?["content_reference"]
+                as? [String: Any] ?? [:]
+            let url = ((license["content_metadata"] as? [String: Any])?["content_url"]
+                as? [String: Any])?["offline_url"] as? String ?? ""
+            print("\(name.padding(toLength: 26, withPad: " ", startingAt: 0)) "
+                  + "drm=\(license["drm_type"] as? String ?? "-") "
+                  + "format=\(reference["content_format"] as? String ?? "-") "
+                  + "ext=\(URL(string: url)?.pathExtension ?? "-")")
+        } catch {
+            print("\(name.padding(toLength: 26, withPad: " ", startingAt: 0)) failed: \(error.localizedDescription)")
+        }
+    }
+}
+
+/// Prints the whole license response, with the voucher removed.
+///
+/// The response carries more than one way to reach the audio, and which one is
+/// usable is not obvious from the client side.
+func dumpLicenseResponse(asin: String) async {
+    let client = makeClient()
+    let body: [String: Any] = [
+        "supported_drm_types": ["Mpeg", "Adrm"],
+        "quality": "High",
+        "consumption_type": "Download",
+        "response_groups": "last_position_heard,content_reference,chapter_info"
+    ]
+    do {
+        let data = try await client.send(
+            method: "POST",
+            path: "content/\(asin)/licenserequest",
+            body: try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys]))
+        guard var root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              var license = root["content_license"] as? [String: Any]
+        else {
+            fail("The response held no license.")
+        }
+        license["license_response"] = "REMOVED"
+        root["content_license"] = license
+        let pretty = try JSONSerialization.data(
+            withJSONObject: root, options: [.prettyPrinted, .sortedKeys])
+        print(String(data: pretty, encoding: .utf8) ?? "unreadable")
+    } catch {
+        fail(error.localizedDescription)
+    }
+}
+
+/// Prints what a license returns, and checks that the file can be fetched.
+///
+/// This exists because a download that fails inside ffmpeg says only that the
+/// server refused it, without saying how the request differed.
+func describeLicense(asin: String) async {
+    let client = makeClient()
+    do {
+        let license = try await LicenseService(client: client).license(for: asin)
+        print("asin:      \(asin)")
+        print("url host:  \(license.downloadURL.host ?? "none")")
+        print("url path:  \(license.downloadURL.path)")
+        print("format:    \(license.downloadURL.pathExtension)")
+        print("chapters:  \(license.chapters.count)")
+        print("key bytes: \(license.key.count), iv bytes: \(license.iv.count)")
+        print("full url:  \(license.downloadURL.absoluteString)")
+    } catch {
+        fail(error.localizedDescription)
+    }
+}
+
 extension String {
     /// The title with characters that a file name cannot hold removed.
     var fileSafe: String {
@@ -179,6 +284,15 @@ case "download":
     await download(
         asin: arguments[1],
         directory: arguments.count > 2 ? arguments[2] : FileManager.default.currentDirectoryPath)
+case "license":
+    guard arguments.count > 1 else { fail("Give an ASIN.") }
+    await describeLicense(asin: arguments[1])
+case "raw":
+    guard arguments.count > 1 else { fail("Give an ASIN.") }
+    await dumpLicenseResponse(asin: arguments[1])
+case "probe":
+    guard arguments.count > 1 else { fail("Give an ASIN.") }
+    await probeLicenseShapes(asin: arguments[1])
 case "logout":
     try? store.clear()
     print("Credentials cleared.")
@@ -188,6 +302,7 @@ default:
     audible-cli library                List every owned title
     audible-cli positions              Show where each title was left
     audible-cli download <ASIN> [dir]  Download and decrypt one title
+    audible-cli license <ASIN>         Show what a license returns
     audible-cli logout                 Forget the stored credentials
     """)
 }
