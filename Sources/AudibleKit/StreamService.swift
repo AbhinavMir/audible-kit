@@ -58,7 +58,7 @@ public final class StreamService: @unchecked Sendable {
         let process = Process()
         process.executableURL = ffmpegURL
         process.currentDirectoryURL = folder
-        process.arguments = StreamService.arguments(for: license, from: offset)
+        process.arguments = StreamService.arguments(for: license, from: offset, in: folder)
         let errors = Pipe()
         process.standardError = errors
         process.standardOutput = Pipe()
@@ -96,7 +96,11 @@ public final class StreamService: @unchecked Sendable {
     /// `-ss` comes before `-i` so ffmpeg seeks with range requests instead of
     /// reading the whole file up to that point. The audio stream is copied, not
     /// re-encoded, so the stream costs almost no processor time.
-    static func arguments(for license: ContentLicense, from offset: TimeInterval) -> [String] {
+    static func arguments(
+        for license: ContentLicense,
+        from offset: TimeInterval,
+        in folder: URL
+    ) -> [String] {
         var arguments = [
             "-nostdin", "-hide_banner", "-loglevel", "error",
             // The delivery network blocks ffmpeg's own agent with a 403 that
@@ -120,8 +124,13 @@ public final class StreamService: @unchecked Sendable {
             "-hls_playlist_type", "event",
             "-hls_flags", "append_list",
             "-hls_segment_type", "fmp4",
-            "-hls_segment_filename", "segment%05d.m4s",
-            "stream.m3u8"
+            // Every output path is absolute. The header file's path is
+            // otherwise resolved against the working directory, which is not
+            // the folder the segments go in, and ffmpeg stops before it
+            // writes anything.
+            "-hls_fmp4_init_filename", "init.mp4",
+            "-hls_segment_filename", folder.appendingPathComponent("segment%05d.m4s").path,
+            folder.appendingPathComponent("stream.m3u8").path
         ]
         return arguments
     }
@@ -143,8 +152,15 @@ public final class StreamService: @unchecked Sendable {
             let segments = (try? FileManager.default.contentsOfDirectory(
                 atPath: playlist.deletingLastPathComponent().path))?
                 .filter { $0.hasSuffix(".m4s") } ?? []
+            // The playlist names the header file, so the player needs that
+            // too before it can start.
+            let folder = playlist.deletingLastPathComponent()
+            let hasHeader = FileManager.default.fileExists(
+                atPath: folder.appendingPathComponent("init.mp4").path)
             if FileManager.default.fileExists(atPath: playlist.path),
+               hasHeader,
                segments.count >= StreamService.segmentsBeforeStart {
+                Log.write("Stream ready with \(segments.count) segments.")
                 return
             }
             try await Task.sleep(for: .milliseconds(250))

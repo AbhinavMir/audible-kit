@@ -13,9 +13,11 @@ struct StreamServiceTests {
         chapters: [],
         lastPositionHeard: nil)
 
+    static let folder = URL(fileURLWithPath: "/tmp/earmark-stream-test", isDirectory: true)
+
     @Test("The stream reads from the network and copies the audio")
     func argumentsUseTheRemoteFile() {
-        let arguments = StreamService.arguments(for: Self.license, from: 0)
+        let arguments = StreamService.arguments(for: Self.license, from: 0, in: Self.folder)
         #expect(arguments.contains("https://example.invalid/audio.aaxc?token=abc"))
         // Copying rather than re-encoding keeps the stream cheap and lossless.
         #expect(arguments.contains("copy"))
@@ -25,14 +27,14 @@ struct StreamServiceTests {
 
     @Test("A stream from the start does not ask ffmpeg to seek")
     func noSeekAtStart() {
-        #expect(!StreamService.arguments(for: Self.license, from: 0).contains("-ss"))
+        #expect(!StreamService.arguments(for: Self.license, from: 0, in: Self.folder).contains("-ss"))
     }
 
     @Test("A stream from a position seeks before opening the input")
     func seeksBeforeInput() {
         // Placed before -i, ffmpeg fetches only the part it needs rather than
         // reading the whole file up to that point.
-        let arguments = StreamService.arguments(for: Self.license, from: 3600)
+        let arguments = StreamService.arguments(for: Self.license, from: 3600, in: Self.folder)
         let seek = try! #require(arguments.firstIndex(of: "-ss"))
         let input = try! #require(arguments.firstIndex(of: "-i"))
         #expect(seek < input)
@@ -42,9 +44,27 @@ struct StreamServiceTests {
     @Test("Segments are short enough to start quickly")
     func segmentLength() {
         #expect(StreamService.segmentSeconds <= 10)
-        let arguments = StreamService.arguments(for: Self.license, from: 0)
+        let arguments = StreamService.arguments(for: Self.license, from: 0, in: Self.folder)
         let time = try! #require(arguments.firstIndex(of: "-hls_time"))
         #expect(arguments[time + 1] == String(StreamService.segmentSeconds))
+    }
+
+    @Test("Every output path is absolute, and the header file is named")
+    func outputPathsAreAbsolute() {
+        // ffmpeg resolves the header file against the working directory unless
+        // the paths are absolute, and then writes nothing at all.
+        let arguments = StreamService.arguments(for: Self.license, from: 0, in: Self.folder)
+        #expect(arguments.contains("-hls_fmp4_init_filename"))
+        #expect(arguments.last == "/tmp/earmark-stream-test/stream.m3u8")
+
+        let segments = try! #require(arguments.firstIndex(of: "-hls_segment_filename"))
+        #expect(arguments[segments + 1].hasPrefix("/tmp/earmark-stream-test/"))
+    }
+
+    @Test("The header file is served with the playlist")
+    func servesInitSegment() {
+        // The playlist names init.mp4, so the server must hand it over too.
+        #expect(LocalMediaServer.contentType(for: "init.mp4") == "audio/mp4")
     }
 
     @Test("The server serves the playlist with the type players expect")
@@ -85,7 +105,7 @@ struct DeliveryHeaderTests {
     func streamSendsTheUserAgent() {
         // The delivery network answers 403 with "request blocked" for any
         // other agent, including ffmpeg's own.
-        let arguments = StreamService.arguments(for: StreamServiceTests.license, from: 0)
+        let arguments = StreamService.arguments(for: StreamServiceTests.license, from: 0, in: StreamServiceTests.folder)
         let flag = try! #require(arguments.firstIndex(of: "-user_agent"))
         #expect(arguments[flag + 1] == URLSessionTransport.userAgent)
         #expect(URLSessionTransport.userAgent.hasPrefix("Audible/"))
@@ -93,7 +113,7 @@ struct DeliveryHeaderTests {
 
     @Test("A stream recovers from a dropped connection")
     func streamReconnects() {
-        let arguments = StreamService.arguments(for: StreamServiceTests.license, from: 0)
+        let arguments = StreamService.arguments(for: StreamServiceTests.license, from: 0, in: StreamServiceTests.folder)
         #expect(arguments.contains("-reconnect"))
     }
 }
