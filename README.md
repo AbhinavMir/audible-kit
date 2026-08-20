@@ -53,6 +53,17 @@ let positions = try await PositionService(client: client)
     .positions(for: books.map(\.asin))
 ```
 
+To play without downloading, stream instead. ffmpeg reads the encrypted file
+over the network, decrypts it, and writes HLS segments that a local server
+hands to the player. Nothing large is stored.
+
+```swift
+let service = try StreamService()
+let stream = try await service.start(license, from: 3600)
+// Hand stream.playlistURL to AVPlayer. Its zero is stream.startOffset.
+service.stop()  // Deletes every segment it wrote.
+```
+
 ## Command-line tool
 
 The package ships a small tool that exercises every path against a real
@@ -92,8 +103,11 @@ both are copyleft, and this package is MIT.
 ## Status
 
 Verified against a real account: device registration, request signing, library
-listing (66 titles), content licensing, voucher decryption, and a download of
-a 32-hour title.
+listing, content licensing, voucher decryption, and a download of a 32-hour
+title that decrypted to a playable M4B.
+
+Streaming is implemented and unit tested. It has not yet been confirmed against
+a live account.
 
 Position reads follow the documented endpoint. The position **write** endpoint
 is implemented but has not been confirmed against a live account yet.
