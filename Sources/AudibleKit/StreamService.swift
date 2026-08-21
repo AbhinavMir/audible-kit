@@ -139,7 +139,9 @@ public final class StreamService: @unchecked Sendable {
             "-audible_key", license.keyHex,
             "-audible_iv", license.ivHex
         ]
-        if offset > 1 {
+        // A place in the file, or nothing. A player that reports an unknown
+        // position gives NaN, and "-ss nan" stops ffmpeg before it starts.
+        if offset.isFinite, offset > 1, offset < 60 * 60 * 24 * 30 {
             arguments += ["-ss", String(format: "%.3f", offset)]
         }
         arguments += [
