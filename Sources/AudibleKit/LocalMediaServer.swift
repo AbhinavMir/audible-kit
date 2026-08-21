@@ -9,7 +9,7 @@ import Network
 public final class LocalMediaServer: @unchecked Sendable {
     private let directory: URL
     private let listener: NWListener
-    private let queue = DispatchQueue(label: "com.earmark.mediaserver")
+    private let queue = DispatchQueue(label: "com.earmarky.mediaserver")
 
     /// The port the server listens on. Chosen by the system.
     public private(set) var port: UInt16 = 0

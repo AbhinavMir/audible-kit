@@ -13,7 +13,7 @@ public enum Log {
         return logs.appendingPathComponent("Earmark.log")
     }()
 
-    private static let queue = DispatchQueue(label: "com.earmark.log")
+    private static let queue = DispatchQueue(label: "com.earmarky.log")
 
     public static func write(_ message: String) {
         let line = "\(stamp()) \(message)\n"

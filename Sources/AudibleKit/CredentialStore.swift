@@ -18,7 +18,7 @@ public struct KeychainCredentialStore: CredentialStore {
     private let service: String
     private let account: String
 
-    public init(service: String = "com.earmark.audiblekit", account: String = "device-identity") {
+    public init(service: String = "com.earmarky.audiblekit", account: String = "device-identity") {
         self.service = service
         self.account = account
     }
