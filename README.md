@@ -88,6 +88,13 @@ try await collections.remove("B0TEST0001", from: reading.id)
 try await collections.delete(reading.id)
 ```
 
+The account's plan is readable. The API reports no credit balance, so this
+carries the plan, its state, and what is billed next.
+
+```swift
+let membership = try await MembershipService(client: client).membership()
+```
+
 ## Design notes
 
 `AudibleClient` is the only type that touches the network. Every service takes
