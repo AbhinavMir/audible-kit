@@ -146,6 +146,12 @@ public struct LicenseService: Sendable {
         return try? JSONSerialization.jsonObject(with: trimmed) as? [String: Any]
     }
 
+    /// The chapters in a license response.
+    ///
+    /// A chapter that is not a place in a book is dropped rather than passed
+    /// on. A negative start would send a player before the beginning, and a
+    /// negative length would put a chapter's end before its own start, which
+    /// breaks moving between them.
     static func chapters(in metadata: [String: Any]) -> [Chapter] {
         guard let info = metadata["chapter_info"] as? [String: Any],
               let entries = info["chapters"] as? [[String: Any]]
@@ -156,7 +162,16 @@ public struct LicenseService: Sendable {
                   let start = entry["start_offset_ms"] as? Double,
                   let length = entry["length_ms"] as? Double
             else { return nil }
-            return Chapter(title: title, start: start / 1000, duration: length / 1000)
+
+            let startSeconds = start / 1000
+            let lengthSeconds = length / 1000
+            guard startSeconds.isFinite, lengthSeconds.isFinite,
+                  startSeconds >= 0, lengthSeconds >= 0,
+                  startSeconds <= PositionService.longestTitle,
+                  lengthSeconds <= PositionService.longestTitle
+            else { return nil }
+
+            return Chapter(title: title, start: startSeconds, duration: lengthSeconds)
         }
     }
 
