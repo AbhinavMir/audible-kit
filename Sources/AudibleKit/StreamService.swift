@@ -16,11 +16,16 @@ public final class StreamService: @unchecked Sendable {
         public let startOffset: TimeInterval
     }
 
-    /// Seconds of audio per segment. Shorter starts sooner and costs more
-    /// requests.
-    public static let segmentSeconds = 6
+    /// Seconds of audio per segment.
+    ///
+    /// Short segments reach the player sooner, which is what decides how long
+    /// a listener waits. The cost is more files and more requests, and neither
+    /// matters on a local server.
+    public static let segmentSeconds = 2
     /// How many segments must exist before the player is handed the playlist.
-    static let segmentsBeforeStart = 2
+    ///
+    /// One is enough: the player begins on it while ffmpeg writes the next.
+    static let segmentsBeforeStart = 1
 
     private let ffmpegURL: URL
     private var process: Process?
@@ -67,12 +72,20 @@ public final class StreamService: @unchecked Sendable {
         try process.run()
         self.process = process
 
+        // The server does not depend on ffmpeg, so it starts while ffmpeg
+        // fetches rather than after it.
+        async let started: Void = {
+            let server = try LocalMediaServer(directory: folder)
+            try await server.start()
+            self.server = server
+        }()
+
         let playlist = folder.appendingPathComponent("stream.m3u8")
         try await waitForFirstSegments(playlist: playlist, process: process, errors: errors)
-
-        let server = try LocalMediaServer(directory: folder)
-        try await server.start()
-        self.server = server
+        try await started
+        guard let server else {
+            throw AudibleError.downloadFailed("The local server did not start.")
+        }
 
         return Stream(playlistURL: server.url(for: "stream.m3u8"), startOffset: offset)
     }
@@ -103,6 +116,10 @@ public final class StreamService: @unchecked Sendable {
     ) -> [String] {
         var arguments = [
             "-nostdin", "-hide_banner", "-loglevel", "error",
+            // Enough of the file to know what the audio is, and no more. The
+            // default reads far more before it writes anything.
+            "-probesize", "500000",
+            "-analyzeduration", "1000000",
             // The delivery network blocks ffmpeg's own agent with a 403 that
             // says only "request blocked".
             "-user_agent", URLSessionTransport.userAgent,
@@ -163,7 +180,7 @@ public final class StreamService: @unchecked Sendable {
                 Log.write("Stream ready with \(segments.count) segments.")
                 return
             }
-            try await Task.sleep(for: .milliseconds(250))
+            try await Task.sleep(for: .milliseconds(100))
         }
         stop()
         throw AudibleError.downloadFailed("The stream did not start.")
