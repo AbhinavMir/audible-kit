@@ -6,6 +6,12 @@ public struct LibraryService: Sendable {
 
     /// Titles per request. The API caps this at 1000.
     public static let pageSize = 250
+    /// The most pages one listing will ask for.
+    ///
+    /// Paging stops when a page comes back short. A server that answers every
+    /// page with a full one would otherwise be followed forever, so there is
+    /// an end to it. This allows a library far larger than any real one.
+    public static let pageLimit = 100
 
     /// Fields the API includes only when asked.
     static let responseGroups = [
@@ -26,12 +32,23 @@ public struct LibraryService: Sendable {
             let task = Task {
                 do {
                     var page = 1
-                    while !Task.isCancelled {
+                    var seen = Set<String>()
+                    while !Task.isCancelled, page <= LibraryService.pageLimit {
                         let books = try await self.page(page)
                         if books.isEmpty { break }
-                        continuation.yield(books)
+
+                        // A server that repeats a page rather than advancing
+                        // would be followed forever. Titles already seen mean
+                        // the end has been reached.
+                        let fresh = books.filter { seen.insert($0.asin).inserted }
+                        if fresh.isEmpty { break }
+                        continuation.yield(fresh)
+
                         if books.count < LibraryService.pageSize { break }
                         page += 1
+                    }
+                    if page > LibraryService.pageLimit {
+                        Log.write("Stopped listing at \(LibraryService.pageLimit) pages.")
                     }
                     continuation.finish()
                 } catch {
