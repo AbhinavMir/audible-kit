@@ -101,6 +101,18 @@ A field the server does not send stays absent. A title with no reported
 runtime keeps a nil duration rather than claiming zero, and a title with no
 recorded position is missing from the result rather than sitting at the start.
 
+## Scope
+
+This package talks to Audible with an account holder's own credentials, and
+reaches only the titles that account already owns. It is meant for listening to
+your own library in a player of your choosing.
+
+It is not a way to obtain audiobooks. It cannot reach a title an account does
+not own, and it produces no output that is any use to anyone but the account
+holder.
+
+Do not distribute audio it produces. That is somebody else's work.
+
 ## Provenance
 
 This is a clean-room implementation written from the wire protocol. Two other
