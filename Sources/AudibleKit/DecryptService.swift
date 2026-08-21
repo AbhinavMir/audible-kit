@@ -29,18 +29,44 @@ public struct DecryptService: Sendable {
     /// True when ffmpeg is installed. Lets a caller warn before work starts.
     public static var isFFmpegInstalled: Bool { locateFFmpeg() != nil }
 
+    /// Finds ffmpeg in the places it is normally installed.
+    ///
+    /// The search does not follow PATH. A program named ffmpeg earlier in PATH
+    /// would be run with this application's privileges, and it is handed the
+    /// key to the audio, so what runs is not something to leave to whatever a
+    /// shell was configured with.
     static func locateFFmpeg() -> URL? {
-        for path in searchPaths where FileManager.default.isExecutableFile(atPath: path) {
+        for path in searchPaths where isSafeToRun(path) {
             return URL(fileURLWithPath: path)
         }
-        guard let pathVariable = ProcessInfo.processInfo.environment["PATH"] else { return nil }
-        for directory in pathVariable.split(separator: ":") {
-            let candidate = "\(directory)/ffmpeg"
-            if FileManager.default.isExecutableFile(atPath: candidate) {
-                return URL(fileURLWithPath: candidate)
-            }
-        }
         return nil
+    }
+
+    /// True when a file is one this application will run.
+    ///
+    /// A file anybody can write to is a file anybody can replace, so being
+    /// executable is not enough on its own.
+    static func isSafeToRun(_ path: String) -> Bool {
+        let manager = FileManager.default
+        guard manager.isExecutableFile(atPath: path),
+              let attributes = try? manager.attributesOfItem(atPath: path),
+              let permissions = (attributes[.posixPermissions] as? NSNumber)?.uint16Value
+        else { return false }
+
+        // Writable by the group or by everybody means anybody can swap it.
+        let groupWrite: UInt16 = 0o020
+        let otherWrite: UInt16 = 0o002
+        guard permissions & (groupWrite | otherWrite) == 0 else { return false }
+
+        // A link can point anywhere. Judge what it points at.
+        if let destination = try? manager.destinationOfSymbolicLink(atPath: path) {
+            let resolved = destination.hasPrefix("/")
+                ? destination
+                : URL(fileURLWithPath: path).deletingLastPathComponent()
+                    .appendingPathComponent(destination).standardizedFileURL.path
+            return resolved == path ? true : isSafeToRun(resolved)
+        }
+        return true
     }
 
     /// Decrypts `source` into `destination`.

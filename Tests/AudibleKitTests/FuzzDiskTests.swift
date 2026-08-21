@@ -111,3 +111,76 @@ struct DiskFuzzTests {
         #expect(FileManager.default.fileSize(at: dir.appendingPathComponent("none")) == nil)
     }
 }
+
+@Suite("What the application will run")
+struct ExecutableSafetyTests {
+
+    static func directory() throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("exec-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    @Test("A program anybody can write to is not run")
+    func refusesWritableBinaries() throws {
+        // A file anybody can write to is a file anybody can replace, and this
+        // one is handed the key to the audio.
+        let dir = try Self.directory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        for permissions in [0o777, 0o775, 0o757, 0o733] {
+            let file = dir.appendingPathComponent("ffmpeg-\(permissions)")
+            FileManager.default.createFile(
+                atPath: file.path, contents: Data("#!/bin/sh\n".utf8),
+                attributes: [.posixPermissions: permissions])
+            #expect(!DecryptService.isSafeToRun(file.path),
+                    "would run a file with permissions \(String(permissions, radix: 8))")
+        }
+    }
+
+    @Test("A program only its owner can write to is run")
+    func acceptsOwnerOnlyBinaries() throws {
+        let dir = try Self.directory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        for permissions in [0o755, 0o750, 0o700] {
+            let file = dir.appendingPathComponent("ffmpeg-\(permissions)")
+            FileManager.default.createFile(
+                atPath: file.path, contents: Data("#!/bin/sh\n".utf8),
+                attributes: [.posixPermissions: permissions])
+            #expect(DecryptService.isSafeToRun(file.path),
+                    "refused a file with permissions \(String(permissions, radix: 8))")
+        }
+    }
+
+    @Test("A link is judged by what it points at")
+    func followsLinks() throws {
+        let dir = try Self.directory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let target = dir.appendingPathComponent("real")
+        FileManager.default.createFile(
+            atPath: target.path, contents: Data("#!/bin/sh\n".utf8),
+            attributes: [.posixPermissions: 0o777])
+
+        let link = dir.appendingPathComponent("linked")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target)
+        #expect(!DecryptService.isSafeToRun(link.path),
+                "followed a link to a file anybody can write")
+    }
+
+    @Test("Nothing that does not exist is run")
+    func refusesAbsentFiles() {
+        #expect(!DecryptService.isSafeToRun("/nowhere/at/all/ffmpeg"))
+        #expect(!DecryptService.isSafeToRun(""))
+    }
+
+    @Test("The search does not follow PATH")
+    func doesNotFollowPath() {
+        // Every place searched is an absolute path that is written down.
+        for path in DecryptService.searchPaths {
+            #expect(path.hasPrefix("/"), "\(path) is not an absolute place")
+        }
+    }
+}

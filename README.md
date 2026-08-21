@@ -177,6 +177,13 @@ what is wrong:
   Matching on the path alone accepts a code from any page that uses the same
   path, and a page inside the sign-in view can navigate wherever it likes. The
   host is checked against every storefront Amazon runs.
+- **ffmpeg is found in written-down places, never through PATH.** A program
+  named ffmpeg earlier in PATH would run with the application's privileges and
+  is handed the key to the audio. A file the group or everybody can write to is
+  refused for the same reason: anybody could replace it.
+- **The key reaches ffmpeg on its command line**, where any process on the
+  machine can read it while the command runs. That is what the tool accepts,
+  and it is worth knowing.
 - **Every request for audio must carry the Audible user agent.** The delivery
   network refuses any other client with 403 and the words "request blocked",
   however valid the signed URL is. ffmpeg's own agent is refused, so a stream
