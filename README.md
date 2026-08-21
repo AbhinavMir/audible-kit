@@ -1,3 +1,5 @@
+<img src="icon.png" width="110" alt="AudibleKit">
+
 # AudibleKit
 
 A Swift client for the Audible API. It registers a device, signs requests,
