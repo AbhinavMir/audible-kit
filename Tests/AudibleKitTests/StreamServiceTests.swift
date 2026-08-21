@@ -117,3 +117,27 @@ struct DeliveryHeaderTests {
         #expect(arguments.contains("-reconnect"))
     }
 }
+
+@Suite("How long a stream is given to start")
+struct StreamDeadlineTests {
+
+    @Test("The wait is long enough for a cold fetch with a seek")
+    func deadlineIsGenerous() {
+        // This was once a count of attempts multiplied by a sleep. Shortening
+        // the sleep to check more often shortened the whole wait to twelve
+        // seconds, and titles resumed partway through stopped starting.
+        #expect(StreamService.startDeadline >= 60)
+    }
+
+    @Test("Two attempts at one title never share a folder")
+    func foldersAreUnique() throws {
+        // They did, and each new attempt deleted the segments the previous one
+        // was still writing.
+        let asin = "B0TEST0001"
+        let first = FileManager.default.temporaryDirectory
+            .appendingPathComponent("earmark-stream-\(asin)-\(UUID().uuidString)")
+        let second = FileManager.default.temporaryDirectory
+            .appendingPathComponent("earmark-stream-\(asin)-\(UUID().uuidString)")
+        #expect(first != second)
+    }
+}

@@ -26,6 +26,13 @@ public final class StreamService: @unchecked Sendable {
     ///
     /// One is enough: the player begins on it while ffmpeg writes the next.
     static let segmentsBeforeStart = 1
+    /// How long to wait for that first segment.
+    ///
+    /// A title the delivery network has not served recently takes far longer
+    /// than one it has, and starting partway into a large file adds to that.
+    /// This is a deadline rather than a count of attempts, so changing how
+    /// often the folder is checked cannot change how long a stream is given.
+    static let startDeadline: TimeInterval = 90
 
     private let ffmpegURL: URL
     private var process: Process?
@@ -54,9 +61,12 @@ public final class StreamService: @unchecked Sendable {
     ) async throws -> Stream {
         stop()
 
+        // A folder of its own for every attempt. Two attempts at one title
+        // shared a folder before, and each new one deleted the segments the
+        // other was still writing.
         let folder = FileManager.default.temporaryDirectory
-            .appendingPathComponent("earmark-stream-\(license.asin)", isDirectory: true)
-        try? FileManager.default.removeItem(at: folder)
+            .appendingPathComponent(
+                "earmark-stream-\(license.asin)-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         workingDirectory = folder
 
@@ -158,7 +168,8 @@ public final class StreamService: @unchecked Sendable {
         process: Process,
         errors: Pipe
     ) async throws {
-        for _ in 0..<120 {
+        let began = Date()
+        while Date().timeIntervalSince(began) < StreamService.startDeadline {
             if !process.isRunning {
                 let text = String(
                     data: errors.fileHandleForReading.readDataToEndOfFile(),
@@ -166,23 +177,24 @@ public final class StreamService: @unchecked Sendable {
                 throw AudibleError.downloadFailed(
                     text.isEmpty ? "The stream stopped before it started." : text)
             }
-            let segments = (try? FileManager.default.contentsOfDirectory(
-                atPath: playlist.deletingLastPathComponent().path))?
-                .filter { $0.hasSuffix(".m4s") } ?? []
-            // The playlist names the header file, so the player needs that
-            // too before it can start.
             let folder = playlist.deletingLastPathComponent()
+            let segments = (try? FileManager.default.contentsOfDirectory(atPath: folder.path))?
+                .filter { $0.hasSuffix(".m4s") } ?? []
+            // The playlist names the header file, so the player needs that too
+            // before it can start.
             let hasHeader = FileManager.default.fileExists(
                 atPath: folder.appendingPathComponent("init.mp4").path)
             if FileManager.default.fileExists(atPath: playlist.path),
                hasHeader,
                segments.count >= StreamService.segmentsBeforeStart {
-                Log.write("Stream ready with \(segments.count) segments.")
+                Log.write(String(
+                    format: "Stream ready after %.1fs.", Date().timeIntervalSince(began)))
                 return
             }
             try await Task.sleep(for: .milliseconds(100))
         }
         stop()
-        throw AudibleError.downloadFailed("The stream did not start.")
+        throw AudibleError.downloadFailed(
+            "The stream did not start within \(Int(StreamService.startDeadline)) seconds.")
     }
 }
