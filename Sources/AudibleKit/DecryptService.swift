@@ -104,6 +104,12 @@ public struct DecryptService: Sendable {
     /// run several minutes longer than the library claims. Only a file that is
     /// clearly short is treated as a failure, and a file that runs long is
     /// always accepted.
+    ///
+    /// This is a second line rather than the first. A container keeps its own
+    /// idea of its length, and that survives the file being cut, so a
+    /// half-finished download can still claim the full duration. The count of
+    /// bytes against what the server said is what actually catches that, and
+    /// it happens as the file arrives.
     static let shortestAcceptedShare = 0.95
 
     func verify(_ file: URL, against expectedDuration: TimeInterval) throws {

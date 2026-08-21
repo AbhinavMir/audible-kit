@@ -104,6 +104,17 @@ public actor DownloadService {
         try handle.close()
         onProgress?(Progress(bytesReceived: received, bytesExpected: expected))
 
+        // The byte count is the only exact test of a whole file.
+        //
+        // A container's own idea of its length survives truncation: a file cut
+        // in half still says how long the whole book was, so a check on
+        // duration passes a download that stopped early. The partial file is
+        // kept, so the next attempt continues rather than starting again.
+        if let expected, received != expected {
+            throw AudibleError.downloadFailed(
+                "The file stopped early: \(received) bytes of \(expected).")
+        }
+
         if FileManager.default.fileExists(atPath: destination.path) {
             try FileManager.default.removeItem(at: destination)
         }
