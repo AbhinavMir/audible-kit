@@ -173,6 +173,10 @@ what is wrong:
   `DELETE .../items?asins=<asin>`. The same call with the ASIN in the path is
   refused, and with the ASIN in a body it fails inside the gateway. Adding a
   title with an `action` of `remove` adds it a second time.
+- **An authorization code is only meaningful from Amazon's own landing page.**
+  Matching on the path alone accepts a code from any page that uses the same
+  path, and a page inside the sign-in view can navigate wherever it likes. The
+  host is checked against every storefront Amazon runs.
 - **Every request for audio must carry the Audible user agent.** The delivery
   network refuses any other client with 403 and the words "request blocked",
   however valid the signed URL is. ffmpeg's own agent is refused, so a stream

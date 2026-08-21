@@ -73,12 +73,33 @@ public struct DeviceRegistration: Sendable {
 
     /// Reads the authorization code out of the redirect the sign-in page ends on.
     ///
-    /// - Returns: The code, or `nil` when this URL is not the landing page yet.
+    /// The address must be Amazon's own landing page. A code is a bearer of
+    /// identity: taking one from any page that happens to use the same path
+    /// would let a page inside the sign-in view hand over a code of its
+    /// choosing, and this Mac would be registered to whoever issued it.
+    ///
+    /// - Returns: The code, or `nil` when this is not Amazon's landing page.
     public static func authorizationCode(in url: URL) -> String? {
-        guard url.path.contains("/ap/maplanding"),
-              let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems
+        guard isAmazonLandingPage(url),
+              let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems,
+              let code = items.first(where: { $0.name == "openid.oa2.authorization_code" })?.value,
+              !code.isEmpty
         else { return nil }
-        return items.first { $0.name == "openid.oa2.authorization_code" }?.value
+        return code
+    }
+
+    /// True when this address is Amazon's own sign-in landing page.
+    static func isAmazonLandingPage(_ url: URL) -> Bool {
+        guard url.scheme == "https", url.path.hasSuffix("/ap/maplanding") else { return false }
+        guard let host = url.host?.lowercased() else { return false }
+
+        // Every storefront Amazon runs, and nothing else. A suffix match alone
+        // would accept "notamazon.com", so the label before the domain has to
+        // end at a dot.
+        return AudibleMarketplace.all.contains { marketplace in
+            let domain = "amazon.\(marketplace.domain)"
+            return host == domain || host.hasSuffix(".\(domain)")
+        }
     }
 
     // MARK: Registration
