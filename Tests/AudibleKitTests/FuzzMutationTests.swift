@@ -173,3 +173,44 @@ struct ArgumentFuzzTests {
         }
     }
 }
+
+@Suite("A place in a series")
+struct SeriesPositionTests {
+
+    @Test("A place that is a number reads as one")
+    func realPositions() {
+        for (text, expected) in [("1", 1.0), ("2.5", 2.5), ("0", 0), ("-1", -1), ("10", 10)] {
+            #expect(SeriesEntry(asin: "S", name: "N", position: text).sortIndex == expected)
+        }
+    }
+
+    @Test("A place that is not a number reads as nothing")
+    func unusablePositions() {
+        // Reading a number from text accepts these, and each of them makes a
+        // comparison answer inconsistently, which is not an ordering.
+        for text in ["nan", "NaN", "inf", "-inf", "infinity", "1e400", "-1e400"] {
+            #expect(SeriesEntry(asin: "S", name: "N", position: text).sortIndex == nil,
+                    "\(text) was taken as a number")
+        }
+        for text in ["", " ", "Book 3", "one", "🎧"] {
+            #expect(SeriesEntry(asin: "S", name: "N", position: text).sortIndex == nil)
+        }
+        #expect(SeriesEntry(asin: "S", name: "N", position: nil).sortIndex == nil)
+    }
+
+    @Test("Sorting by place is a real ordering for any data")
+    func sortingIsConsistent() {
+        let positions = ["1", "nan", "2", "inf", "Book 3", "", "0.5", "-inf", "1e400"]
+        let entries = positions.map { SeriesEntry(asin: "S", name: "N", position: $0) }
+
+        // Every pair must answer consistently in both directions.
+        for first in entries {
+            for second in entries {
+                let a = first.sortIndex ?? .greatestFiniteMagnitude
+                let b = second.sortIndex ?? .greatestFiniteMagnitude
+                if a < b { #expect(!(b < a)) }
+                if a == b { #expect(!(a < b) && !(b < a)) }
+            }
+        }
+    }
+}

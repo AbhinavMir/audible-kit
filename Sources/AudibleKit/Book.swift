@@ -69,9 +69,15 @@ public struct SeriesEntry: Sendable, Hashable, Codable {
         self.position = position
     }
 
-    /// Position as a number, for sorting. `nil` when it does not parse.
+    /// Position as a number, for sorting. `nil` when it is not one.
+    ///
+    /// Reading a number from text accepts "nan" and "inf", and a figure too
+    /// large becomes infinity. A value that is not a number compares false
+    /// against everything, including itself, which is not an ordering: sorting
+    /// by it can end the process.
     public var sortIndex: Double? {
-        position.flatMap(Double.init)
+        guard let value = position.flatMap(Double.init), value.isFinite else { return nil }
+        return value
     }
 }
 
