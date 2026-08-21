@@ -52,17 +52,36 @@ public struct PositionService: Sendable {
         return result
     }
 
+    /// The furthest into a title a position can be. Beyond this it is not a
+    /// place in a book.
+    static let longestTitle: TimeInterval = 60 * 60 * 24 * 7
+
     /// Records a position for one title.
+    ///
+    /// - Throws: `malformedResponse` when the position is not a real place. A
+    ///   player that does not yet know where it is reports a value that is not
+    ///   a number, and turning that into an integer ends the process.
     public func record(_ position: ListeningPosition) async throws {
+        guard let milliseconds = PositionService.milliseconds(position.position) else {
+            throw AudibleError.malformedResponse(
+                "\(position.position) is not a place in a title.")
+        }
         let body: [String: Any] = [
             "type": "LastHeard",
             "key": position.asin,
-            "value": String(Int(position.position * 1000))
+            "value": String(milliseconds)
         ]
         _ = try await client.send(
             method: "PUT",
             path: "annotations/lastpositions",
             body: try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys]))
+    }
+
+    /// A place in a title as whole milliseconds, or nil when it is not one.
+    static func milliseconds(_ seconds: TimeInterval) -> Int? {
+        guard seconds.isFinite, !seconds.isNaN else { return nil }
+        guard seconds >= 0, seconds <= longestTitle else { return nil }
+        return Int(seconds * 1000)
     }
 
     /// Decides which of two positions to keep.
@@ -98,9 +117,14 @@ public struct PositionService: Sendable {
             let stamp = (annotation["last_updated"] as? String)
                 .flatMap { ISO8601DateFormatter.withFraction.date(from: $0)
                     ?? ISO8601DateFormatter.withoutFraction.date(from: $0) }
+            // A server can report a figure that is not a place in any book.
+            // Keeping it would push a listener somewhere impossible.
+            let seconds = milliseconds / 1000
+            guard seconds.isFinite, seconds >= 0, seconds <= longestTitle else { continue }
+
             positions[asin] = ListeningPosition(
                 asin: asin,
-                position: milliseconds / 1000,
+                position: seconds,
                 // A position with no timestamp is treated as very old, so a
                 // local position with a real timestamp wins over it.
                 recordedAt: stamp ?? .distantPast)

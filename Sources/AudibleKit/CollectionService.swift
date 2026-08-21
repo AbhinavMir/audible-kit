@@ -99,6 +99,12 @@ public struct CollectionService: Sendable {
     /// - Returns: How many the server says it added.
     @discardableResult
     public func add(_ asins: [String], to collectionID: String) async throws -> Int {
+        // An empty identifier names no title, and a repeat asks twice for the
+        // same thing. Neither belongs in a request that changes an account.
+        var seen = Set<String>()
+        let asins = asins
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && seen.insert($0).inserted }
         guard !asins.isEmpty else { return 0 }
         let data = try await client.send(
             method: "POST",
@@ -115,6 +121,12 @@ public struct CollectionService: Sendable {
     /// The ASIN goes in the query. In the path the request is refused, and in
     /// a body it fails inside the gateway.
     public func remove(_ asin: String, from collectionID: String) async throws {
+        // Without an identifier the request addresses the collection itself,
+        // and the method is DELETE.
+        let asin = asin.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !asin.isEmpty else {
+            throw AudibleError.malformedResponse("A title to remove was not named.")
+        }
         _ = try await client.send(
             method: "DELETE",
             path: "collections/\(collectionID)/items",
