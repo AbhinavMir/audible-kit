@@ -12,6 +12,26 @@ public final class FileCredentialStore: CredentialStore, @unchecked Sendable {
     /// Read once, then kept, so a launch touches the disk a single time.
     private var cached: DeviceIdentity?
     private var didRead = false
+    /// What the file looked like when it was read. The kept copy is used only
+    /// while the file on disk still looks like that.
+    private var readStamp: FileStamp?
+
+    /// Enough of a file to tell whether it has changed.
+    private struct FileStamp: Equatable {
+        let modified: Date?
+        let size: Int?
+
+        init(_ url: URL) {
+            let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
+            modified = attributes?[.modificationDate] as? Date
+            size = (attributes?[.size] as? NSNumber)?.intValue
+        }
+
+        /// A file that is not there has no stamp of its own.
+        static func of(_ url: URL) -> FileStamp? {
+            FileManager.default.fileExists(atPath: url.path) ? FileStamp(url) : nil
+        }
+    }
 
     public init(fileURL: URL = FileCredentialStore.defaultFileURL) {
         self.fileURL = fileURL
@@ -36,9 +56,18 @@ public final class FileCredentialStore: CredentialStore, @unchecked Sendable {
 
     public func load() throws -> DeviceIdentity? {
         try lock.withLock {
-            if didRead { return cached }
+            let stamp = FileStamp.of(fileURL)
+
+            // The kept copy stands only while the file is as it was. Anything
+            // else writing it — another store, another copy of the
+            // application, a person restoring a backup — is noticed rather
+            // than ignored, so nobody is told they are signed out while a
+            // perfectly good sign-in sits on disk.
+            if didRead, stamp == readStamp { return cached }
+
             didRead = true
-            guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            readStamp = stamp
+            guard stamp != nil else {
                 cached = nil
                 return nil
             }
@@ -64,6 +93,7 @@ public final class FileCredentialStore: CredentialStore, @unchecked Sendable {
                 [.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
             cached = identity
             didRead = true
+            readStamp = FileStamp.of(fileURL)
         }
     }
 
@@ -74,6 +104,7 @@ public final class FileCredentialStore: CredentialStore, @unchecked Sendable {
             }
             cached = nil
             didRead = true
+            readStamp = nil
         }
     }
 }

@@ -112,14 +112,27 @@ struct FileCredentialStoreTests {
         #expect(attributes[.posixPermissions] as? NSNumber == 0o600)
     }
 
-    @Test("Reading twice touches the disk once")
-    func cachesAfterFirstRead() throws {
+    @Test("Reading twice does not decode the file twice")
+    func keepsWhatItRead() throws {
         let (store, url) = Self.temporaryStore()
         try store.save(.testIdentity())
-        _ = try store.load()
-        // Removing the file cannot affect a store that already read it.
-        try FileManager.default.removeItem(at: url)
+
+        let first = try store.load()
+        let second = try store.load()
+        #expect(first?.customerID == second?.customerID)
+        #expect(FileManager.default.fileExists(atPath: url.path))
+    }
+
+    @Test("Credentials removed from disk mean signed out")
+    func noticesRemoval() throws {
+        // Somebody clearing the file means to be signed out. Serving a kept
+        // copy would keep them signed in until the application closed.
+        let (store, url) = Self.temporaryStore()
+        try store.save(.testIdentity())
         #expect(try store.load() != nil)
+
+        try FileManager.default.removeItem(at: url)
+        #expect(try store.load() == nil, "a deleted sign-in was still served")
     }
 
     @Test("Clearing removes the file")
@@ -174,11 +187,9 @@ struct CredentialLocationTests {
         #expect(try store.load() != nil, "a store forgot what it had just saved")
     }
 
-    @Test("A store that has read once does not see another store's save")
+    @Test("A store that has read once sees another store's save")
     func savingThroughAnotherStore() throws {
-        // This is why one store is shared. A store remembers what it read, so
-        // a sign-in kept through a second one leaves the first still
-        // believing nobody has signed in.
+        // A store keeps what it read, but only while the file is as it was.
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("other-\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: url) }
@@ -187,9 +198,11 @@ struct CredentialLocationTests {
         #expect(try first.load() == nil)
 
         try FileCredentialStore(fileURL: url).save(.testIdentity())
-        #expect(try first.load() == nil, "the behaviour this test pins has changed")
 
-        // A store made afterwards reads what is really there.
+        // The file changed, so the kept copy no longer stands. Without this a
+        // sign-in kept through one store leaves another believing nobody has
+        // signed in, which is how a signed-in account looked signed out.
+        #expect(try first.load() != nil, "a store ignored a sign-in on disk")
         #expect(try FileCredentialStore(fileURL: url).load() != nil)
     }
 }
