@@ -137,3 +137,59 @@ struct FileCredentialStoreTests {
         #expect(try store.load() == nil)
     }
 }
+
+@Suite("Where credentials are kept")
+struct CredentialLocationTests {
+
+    @Test("The package does not write a product's name of its own")
+    func pathIsNotHardCoded() {
+        // A package that writes its own idea of a product name into an
+        // application's folder is wrong the moment that application is
+        // renamed, and the credentials are then simply gone.
+        let path = FileCredentialStore.defaultFileURL.path
+        #expect(!path.contains("/Earmark/"), "the package chose a product name: \(path)")
+        #expect(path.hasSuffix("credentials.json"))
+    }
+
+    @Test("A store told where to look uses that place")
+    func explicitPathWins() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("where-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        try FileCredentialStore(fileURL: url).save(.testIdentity())
+        #expect(FileManager.default.fileExists(atPath: url.path))
+    }
+
+    @Test("A store that has read once still sees what it saves")
+    func savingThroughTheSameStore() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("same-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let store = FileCredentialStore(fileURL: url)
+        #expect(try store.load() == nil)
+
+        try store.save(.testIdentity())
+        #expect(try store.load() != nil, "a store forgot what it had just saved")
+    }
+
+    @Test("A store that has read once does not see another store's save")
+    func savingThroughAnotherStore() throws {
+        // This is why one store is shared. A store remembers what it read, so
+        // a sign-in kept through a second one leaves the first still
+        // believing nobody has signed in.
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("other-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let first = FileCredentialStore(fileURL: url)
+        #expect(try first.load() == nil)
+
+        try FileCredentialStore(fileURL: url).save(.testIdentity())
+        #expect(try first.load() == nil, "the behaviour this test pins has changed")
+
+        // A store made afterwards reads what is really there.
+        #expect(try FileCredentialStore(fileURL: url).load() != nil)
+    }
+}

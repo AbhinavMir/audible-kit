@@ -17,11 +17,20 @@ public final class FileCredentialStore: CredentialStore, @unchecked Sendable {
         self.fileURL = fileURL
     }
 
+    /// Where credentials go when the caller does not say.
+    ///
+    /// The folder is named after the application that is running, not after
+    /// any one product: a package that writes a name of its own into another
+    /// application's folder is wrong the moment that application is renamed,
+    /// and the credentials are then simply gone.
     public static var defaultFileURL: URL {
         let base = FileManager.default.urls(
             for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let name = (Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String)
+            ?? Bundle.main.bundleIdentifier
+            ?? "AudibleKit"
         return base
-            .appendingPathComponent("Earmark", isDirectory: true)
+            .appendingPathComponent(name, isDirectory: true)
             .appendingPathComponent("credentials.json")
     }
 
